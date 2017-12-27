@@ -117,9 +117,12 @@
 //! // conventions.
 //! #[allow(non_snake_case)]
 //! pub extern "system" fn Java_HelloWorld_hello(env: JNIEnv,
-//!                                              // this is the class that owns our
-//!                                              // static method. Not going to be
-//!                                              // used, but still needs to have an
+//! // this is the class that owns
+//! our
+//! // static method. Not going to
+//! be
+//! // used, but still needs to
+//! have an
 //!                                              // argument slot
 //!                                              class: JClass,
 //!                                              input: JString)
@@ -168,6 +171,9 @@ extern crate combine;
 extern crate cesu8;
 
 mod wrapper {
+    mod version;
+    pub use self::version::*;
+
     #[macro_use]
     mod macros;
 

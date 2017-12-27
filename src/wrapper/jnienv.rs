@@ -11,35 +11,60 @@ use std::sync::MutexGuard;
 
 use errors::*;
 
-use sys::{self, jarray, jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jshort, jsize,
-          jvalue, jbooleanArray, jbyteArray, jcharArray, jdoubleArray, jfloatArray, jintArray,
-          jlongArray, jobjectArray, jshortArray};
-use std::os::raw::{c_char, c_void};
+use std::os::raw::{
+    c_char,
+    c_void,
+};
 use std::ptr;
+use sys::{
+    self,
+    jarray,
+    jboolean,
+    jbyte,
+    jchar,
+    jdouble,
+    jfloat,
+    jint,
+    jlong,
+    jshort,
+    jsize,
+    jvalue,
+    jbooleanArray,
+    jbyteArray,
+    jcharArray,
+    jdoubleArray,
+    jfloatArray,
+    jintArray,
+    jlongArray,
+    jobjectArray,
+    jshortArray,
+};
 
 use strings::JNIString;
 use strings::JavaStr;
 
-use objects::JMap;
-use objects::JValue;
-use objects::JClass;
-use objects::JObject;
+use objects::AutoLocal;
+use objects::GlobalRef;
 use objects::JByteBuffer;
+use objects::JClass;
+use objects::JFieldID;
+use objects::JMap;
+use objects::JMethodID;
+use objects::JObject;
+use objects::JStaticFieldID;
+use objects::JStaticMethodID;
 use objects::JString;
 use objects::JThrowable;
-use objects::JMethodID;
-use objects::JStaticMethodID;
-use objects::JFieldID;
-use objects::GlobalRef;
-use objects::AutoLocal;
+use objects::JValue;
 
 use descriptors::Desc;
 
-use signature::TypeSignature;
 use signature::JavaType;
 use signature::Primitive;
+use signature::TypeSignature;
 
 use JavaVM;
+use JNIVersion;
 
 /// FFI-compatible JNIEnv struct. You can safely use this as the JNIEnv argument
 /// to exported methods that will be called by java. This is where most of the
@@ -74,12 +99,10 @@ impl<'a> JNIEnv<'a> {
             lifetime: PhantomData,
         })
     }
-    /// Get the java version that we're being executed from. This is encoded and
-    /// will need to be checked against constants from the sys module.
-    ///
-    /// TODO: convert this to something more usable.
-    pub fn get_version(&self) -> Result<jint> {
-        Ok(unsafe { jni_unchecked!(self.internal, GetVersion) })
+
+    /// Get the java version that we're being executed from.
+    pub fn get_version(&self) -> Result<JNIVersion> {
+        Ok(unsafe { jni_unchecked!(self.internal, GetVersion) }.into())
     }
 
     /// Define a new java class. See the JNI docs for more details - I've never
@@ -191,8 +214,8 @@ impl<'a> JNIEnv<'a> {
     /// thrown. An exception is in this state from the time it gets thrown and
     /// not caught in a java function until `exception_clear` is called.
     pub fn exception_occurred(&self) -> Result<JThrowable> {
-        let throwable = jni_call!(self.internal, ExceptionOccurred);
-        Ok(throwable)
+        let throwable = unsafe { jni_unchecked!(self.internal, ExceptionOccurred) };
+        Ok(JThrowable::from(throwable))
     }
 
     /// Print exception information to the console.
@@ -281,9 +304,12 @@ impl<'a> JNIEnv<'a> {
 
     /// Creates a new auto-deleted local reference.
     ///
-    /// See also `push_local_frame`/`pop_local_frame` methods that can be more convenient
-    /// when you create a bounded number of local references in a method but can't rely on
-    /// automatic de-allocation (e.g., in case of recursion or just deep call stacks).
+    /// See also `push_local_frame`/`pop_local_frame` methods that can be more
+    /// convenient
+    /// when you create a bounded number of local references in a method but
+    /// can't rely on
+    /// automatic de-allocation (e.g., in case of recursion or just deep call
+    /// stacks).
     pub fn auto_local(&'a self, obj: JObject<'a>) -> AutoLocal<'a> {
         AutoLocal::new(self, obj)
     }
@@ -291,16 +317,24 @@ impl<'a> JNIEnv<'a> {
 
     /// Deletes the local reference.
     ///
-    /// Local references are valid for the duration of a native method call. They are
-    /// freed automatically after the native method returns. Each local reference costs
-    /// some amount of Java Virtual Machine resource. Programmers need to make sure that
-    /// native methods do not excessively allocate local references. Although local
-    /// references are automatically freed after the native method returns to Java,
-    /// excessive allocation of local references may cause the VM to run out of memory
+    /// Local references are valid for the duration of a native method call.
+    /// They are
+    /// freed automatically after the native method returns. Each local
+    /// reference costs
+    /// some amount of Java Virtual Machine resource. Programmers need to make
+    /// sure that
+    /// native methods do not excessively allocate local references. Although
+    /// local
+    /// references are automatically freed after the native method returns to
+    /// Java,
+    /// excessive allocation of local references may cause the VM to run out of
+    /// memory
     /// during the execution of a native method.
     ///
-    /// In most cases it is better to use `AutoLocal` (see `auto_local` method) or
-    /// `push_local_frame`/`pop_local_frame` instead of direct `delete_local_ref` calls.
+    /// In most cases it is better to use `AutoLocal` (see `auto_local` method)
+    /// or
+    /// `push_local_frame`/`pop_local_frame` instead of direct
+    /// `delete_local_ref` calls.
     pub fn delete_local_ref(&self, obj: JObject) -> Result<()> {
         non_null!(obj, "delete_local_ref obj argument");
         Ok(unsafe {
@@ -308,7 +342,8 @@ impl<'a> JNIEnv<'a> {
         })
     }
 
-    /// Creates a new local reference frame, in which at least a given number of local
+    /// Creates a new local reference frame, in which at least a given number
+    /// of local
     /// references can be created.
     ///
     /// Returns `Err` on failure, with a pending `OutOfMemoryError`.
@@ -316,14 +351,16 @@ impl<'a> JNIEnv<'a> {
     /// Prefer to use `with_local_frame` instead of direct `push_local_frame`/
     /// `pop_local_frame` calls.
     ///
-    /// See also `auto_local` method and `AutoLocal` type - that approach can be more
+    /// See also `auto_local` method and `AutoLocal` type - that approach can
+    /// be more
     /// convenient in loops.
     pub fn push_local_frame(&self, capacity: i32) -> Result<()> {
         // `PushLocalFrame` returns `jint`, but we don't need it.
         Ok(jni_void_call!(self.internal, PushLocalFrame, capacity))
     }
 
-    /// Pops off the current local reference frame, frees all the local references allocated
+    /// Pops off the current local reference frame, frees all the local
+    /// references allocated
     /// on the current stack frame.
     ///
     /// Note that resulting `JObject` can be `NULL` if `result` is `NULL`.
@@ -333,11 +370,12 @@ impl<'a> JNIEnv<'a> {
         })
     }
 
-    /// Provides a convenient way to use `push_local_frame` by automatically calling
+    /// Provides a convenient way to use `push_local_frame` by automatically
+    /// calling
     /// `pop_local_frame` function.
     pub fn with_local_frame<F>(&self, capacity: i32, f: F) -> Result<JObject>
-        where
-            F: Fn() -> Result<JObject<'a>>,
+    where
+        F: Fn() -> Result<JObject<'a>>,
     {
         self.push_local_frame(capacity)?;
         let res = f();
@@ -470,6 +508,50 @@ impl<'a> JNIEnv<'a> {
             Ok(jni_call!(
                 self.internal,
                 GetFieldID,
+                class.into_inner(),
+                ffi_name.as_ptr(),
+                ffi_sig.as_ptr()
+            ))
+        });
+
+        match res {
+            Ok(m) => Ok(m),
+            Err(e) => match e.kind() {
+                &ErrorKind::NullPtr(_) => {
+                    let name: String = ffi_name.into();
+                    let sig: String = ffi_sig.into();
+                    return Err(ErrorKind::FieldNotFound(name, sig).into());
+                }
+                _ => return Err(e),
+            },
+        }
+    }
+
+    /// Look up the static field ID for a class/name/type combination.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let field_id = env.get_static_field_id("com/my/Class", "intField", "I");
+    /// ```
+    pub fn get_static_field_id<'c, T, U, V>(
+        &self,
+        class: T,
+        name: U,
+        sig: V,
+    ) -> Result<JStaticFieldID<'a>>
+    where
+        T: Desc<'a, JClass<'c>>,
+        U: Into<JNIString>,
+        V: Into<JNIString>,
+    {
+        let class = class.lookup(self)?;
+        let ffi_name = name.into();
+        let ffi_sig = sig.into();
+
+        let res: Result<JStaticFieldID> = catch!({
+            Ok(jni_call!(
+                self.internal,
+                GetStaticFieldID,
                 class.into_inner(),
                 ffi_name.as_ptr(),
                 ffi_sig.as_ptr()
@@ -800,7 +882,8 @@ impl<'a> JNIEnv<'a> {
         self.new_object_by_id(class, method_id, ctor_args)
     }
 
-    /// Create a new object using a constructor. Arguments aren't checked because
+    /// Create a new object using a constructor. Arguments aren't checked
+    /// because
     /// of the `JMethodID` usage.
     pub fn new_object_by_id<'c, T>(
         &self,
@@ -885,7 +968,8 @@ impl<'a> JNIEnv<'a> {
     /// Construct a new array holding objects in class `element_class`.
     /// All elements are initially set to `initial_element`.
     ///
-    /// This function returns a local reference, that must not be allocated excessively.
+    /// This function returns a local reference, that must not be allocated
+    /// excessively.
     /// See [Java documentation][1] for details.
     /// [1]: https://docs.oracle.com/javase/8/docs/technotes/guides/jni/spec/design.html#global_and_local_references
     pub fn new_object_array<T>(
@@ -1497,6 +1581,87 @@ impl<'a> JNIEnv<'a> {
         res
     }
 
+    /// Get a static field without checking the provided type against the actual
+    /// field.
+    #[allow(unused_unsafe)]
+    pub unsafe fn get_static_field_unsafe<T, U>(
+        &self,
+        class: T,
+        field: U,
+        ty: JavaType,
+    ) -> Result<JValue>
+    where
+        T: Desc<'a, JClass<'a>>,
+        U: Desc<'a, JStaticFieldID<'a>>,
+    {
+        let class = class.lookup(self)?.into_inner();
+
+        let field_id = field.lookup(self)?.into_inner();
+
+        // TODO clean this up
+        Ok(match ty {
+            JavaType::Object(_) | JavaType::Array(_) => {
+                let obj: JObject = jni_call!(self.internal, GetStaticObjectField, class, field_id);
+                obj.into()
+            }
+            // JavaType::Object
+            JavaType::Method(_) => {
+                return Err(ErrorKind::WrongJValueType("Method", "see java field").into())
+            }
+            JavaType::Primitive(p) => {
+                let v: JValue = match p {
+                    Primitive::Boolean => {
+                        (jni_unchecked!(self.internal, GetStaticBooleanField, class, field_id)
+                            == sys::JNI_TRUE)
+                            .into()
+                    }
+                    Primitive::Char => {
+                        jni_unchecked!(self.internal, GetStaticCharField, class, field_id).into()
+                    }
+                    Primitive::Short => {
+                        jni_unchecked!(self.internal, GetStaticShortField, class, field_id).into()
+                    }
+                    Primitive::Int => {
+                        jni_unchecked!(self.internal, GetStaticIntField, class, field_id).into()
+                    }
+                    Primitive::Long => {
+                        jni_unchecked!(self.internal, GetStaticLongField, class, field_id).into()
+                    }
+                    Primitive::Float => {
+                        jni_unchecked!(self.internal, GetStaticFloatField, class, field_id).into()
+                    }
+                    Primitive::Double => {
+                        jni_unchecked!(self.internal, GetStaticDoubleField, class, field_id).into()
+                    }
+                    Primitive::Byte => {
+                        jni_unchecked!(self.internal, GetStaticByteField, class, field_id).into()
+                    }
+                    Primitive::Void => {
+                        return Err(ErrorKind::WrongJValueType("void", "see java field").into());
+                    }
+                };
+                v.into()
+            } // JavaType::Primitive
+        }) // match ty
+    }
+
+    /// Get a static field. Requires a class lookup and a field id lookup
+    /// internally.
+    pub fn get_static_field<T, U, V>(&self, class: T, field: U, sig: V) -> Result<JValue>
+    where
+        T: Desc<'a, JClass<'a>>,
+        U: Into<JNIString>,
+        V: Into<JNIString> + AsRef<str>,
+    {
+        let ty = JavaType::from_str(sig.as_ref())?;
+
+        // go ahead and look up the class since it's already Copy,
+        // and we'll need that for the next call.
+        let class = class.lookup(self)?;
+
+        unsafe { self.get_static_field_unsafe(class, (class, field, sig), ty) }
+    }
+
     /// Surrenders ownership of a rust object to Java. Requires an object with a
     /// `long` field to store the pointer. The Rust value will be wrapped in a
     /// Mutex since Java will be controlling where it'll be used thread-wise.
@@ -1620,7 +1785,8 @@ impl<'a> JNIEnv<'a> {
         }
     }
 
-    /// Ensures that at least a given number of local references can be created in the current thread.
+    /// Ensures that at least a given number of local references can be created
+    /// in the current thread.
     pub fn ensure_local_capacity(&self, capacity: jint) -> Result<()> {
         Ok(jni_void_call!(self.internal, EnsureLocalCapacity, capacity))
     }
