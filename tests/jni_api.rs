@@ -61,3 +61,15 @@ pub fn is_instance_of_null() {
     assert!(unwrap(&env, env.is_instance_of(obj, EXCEPTION_CLASS)));
     assert!(unwrap(&env, env.is_instance_of(obj, ARITHMETIC_EXCEPTION_CLASS)));
 }
+
+#[test]
+pub fn reentrant_attachguard() {
+    // After dropping of the `_inner` `AttachGuard`,
+    // native thread with `outer` should still in the expected "attached" state.
+
+    let outer = attach_current_thread();
+    {
+        let _inner = attach_current_thread();
+    }
+    let _ = unwrap(&outer, outer.get_version());
+}
