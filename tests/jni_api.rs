@@ -61,3 +61,24 @@ pub fn is_instance_of_null() {
     assert!(unwrap(&env, env.is_instance_of(obj, EXCEPTION_CLASS)));
     assert!(unwrap(&env, env.is_instance_of(obj, ARITHMETIC_EXCEPTION_CLASS)));
 }
+
+#[test]
+pub fn env_should_not_outlive_guard() {
+    use jni::{JavaVM, JNIEnv};
+
+    let vm: JavaVM;
+    let env: JNIEnv;
+    {
+        let env_guard = attach_current_thread();
+        vm = env_guard.get_java_vm().unwrap();
+        // The lifetime of `env` is tied to the lifetime of `vm`, that is wrong
+        env = vm.get_env().unwrap();
+        assert!(vm.get_env().is_ok());
+        let _ = unwrap(&env, env.get_version());
+    }
+    assert!(vm.get_env().is_err());
+    // This line leads to SIGABRT
+    // "FATAL ERROR in native method: Using JNIEnv in non-Java thread"
+    let _ = unwrap(&env, env.get_version());
+    println!("this println is unreachable");
+}
